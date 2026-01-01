@@ -70,6 +70,27 @@ const videoSchema = new mongoose.Schema({
     type: Date,
     default: null,
   },
+  sharedWith: [
+    {
+      userId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+      },
+      email: {
+        type: String,
+        lowercase: true,
+      },
+      role: {
+        type: String,
+        enum: ['viewer', 'editor'],
+        default: 'viewer',
+      },
+      shareId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Share',
+      },
+    },
+  ],
 }, { timestamps: true });
 
 // Index for faster queries

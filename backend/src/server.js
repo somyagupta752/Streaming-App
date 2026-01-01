@@ -9,6 +9,7 @@ import path from 'path';
 import { connectDB } from './config/database.js';
 import authRoutes from './routes/authRoutes.js';
 import videoRoutes from './routes/videoRoutes.js';
+import shareRoutes from './routes/shareRoutes.js';
 
 // Load environment variables
 dotenv.config();
@@ -39,6 +40,7 @@ connectDB();
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/videos', videoRoutes);
+app.use('/api', shareRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -97,3 +99,4 @@ process.on('SIGINT', () => {
     process.exit(0);
   });
 });
+

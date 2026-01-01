@@ -7,6 +7,7 @@ import {
   getVideos,
   getVideoDetails,
   deleteVideo,
+  updateVideo,
   streamVideo,
   getJobProgress,
 } from '../controllers/videoController.js';
@@ -46,6 +47,7 @@ const upload = multer({
 router.post('/upload', authenticateToken, authorize('editor', 'admin'), upload.single('video'), uploadVideo);
 router.get('/', authenticateToken, getVideos);
 router.get('/:id', authenticateToken, getVideoDetails);
+router.patch('/:id', authenticateToken, updateVideo);
 router.delete('/:id', authenticateToken, deleteVideo);
 router.get('/:id/stream', authenticateToken, streamVideo);
 router.get('/job/:jobId/progress', authenticateToken, getJobProgress);

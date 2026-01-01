@@ -46,9 +46,21 @@ export const videoAPI = {
     }),
   getVideos: (params: any) => api.get('/videos', { params }),
   getVideoDetails: (id: any) => api.get(`/videos/${id}`),
+  updateVideo: (id: any, data: any) => api.patch(`/videos/${id}`, data),
   deleteVideo: (id: any) => api.delete(`/videos/${id}`),
   streamVideo: (id: any) => api.get(`/videos/${id}/stream`),
   getJobProgress: (jobId: any) => api.get(`/videos/job/${jobId}/progress`),
+};
+
+// Sharing endpoints
+export const shareAPI = {
+  shareVideo: (videoId: any, email: string, role: string) =>
+    api.post(`/videos/${videoId}/share`, { email, role }),
+  getVideoShares: (videoId: any) => api.get(`/videos/${videoId}/shares`),
+  updateShare: (shareId: any, role: string) =>
+    api.put(`/shares/${shareId}`, { role }),
+  unshareVideo: (shareId: any) => api.delete(`/shares/${shareId}`),
+  getSharedVideos: (params: any) => api.get('/shared', { params }),
 };
 
 export default api;

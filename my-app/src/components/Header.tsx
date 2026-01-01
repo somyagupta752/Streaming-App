@@ -1,5 +1,5 @@
 import React from 'react';
-import { Zap, Menu, X, LogOut } from 'lucide-react';
+import { Zap, Menu, X, LogOut, User } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 
@@ -8,12 +8,14 @@ export const Header: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const isAuthed = !!localStorage.getItem('token');
+  const user = isAuthed ? JSON.parse(localStorage.getItem('user') || '{}') : null;
 
   const isActive = (path: string) => location.pathname === path;
 
   const navLinks = [
     { path: '/dashboard', label: 'Dashboard' },
     { path: '/library', label: 'Library' },
+    { path: '/shared-with-me', label: 'Shared' },
     { path: '/upload', label: 'Upload' },
   ];
 
@@ -58,13 +60,15 @@ export const Header: React.FC = () => {
           <div className="flex items-center gap-4">
             {isAuthed ? (
               <>
-                <button
-                  onClick={handleLogout}
-                  className="hidden sm:flex btn-ghost gap-2"
+                <Link
+                  to="/profile"
+                  className="hidden sm:flex items-center gap-2 px-4 py-2 rounded-lg bg-neutral-50 hover:bg-neutral-100 transition-colors"
                 >
-                  <LogOut className="w-4 h-4" />
-                  Logout
-                </button>
+                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center text-white">
+                    <User className="w-4 h-4" />
+                  </div>
+                  <span className="text-sm font-medium text-neutral-700">{user?.name || 'User'}</span>
+                </Link>
               </>
             ) : (
               <>
@@ -106,6 +110,25 @@ export const Header: React.FC = () => {
                     {link.label}
                   </Link>
                 ))}
+                <div className="border-t border-neutral-100 mt-4 pt-4 space-y-2">
+                  <Link
+                    to="/profile"
+                    onClick={() => setIsOpen(false)}
+                    className="block px-4 py-2 text-sm text-primary-600 hover:bg-primary-50 transition-colors rounded-lg"
+                  >
+                    View Profile
+                  </Link>
+                  <button
+                    onClick={() => {
+                      handleLogout();
+                      setIsOpen(false);
+                    }}
+                    className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2 transition-colors rounded-lg"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    Logout
+                  </button>
+                </div>
               </>
             )}
             {!isAuthed && (

@@ -7,6 +7,8 @@ import { Register } from './pages/Register';
 import { Dashboard } from './pages/Dashboard';
 import { Upload } from './pages/Upload';
 import { Library } from './pages/Library';
+import { SharedWithMe } from './pages/SharedWithMe';
+import { Profile } from './pages/Profile';
 
 function App() {
   const isAuthenticated = !!localStorage.getItem('token');
@@ -48,6 +50,22 @@ function App() {
               element={
                 <ProtectedRoute>
                   <Library />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/shared-with-me"
+              element={
+                <ProtectedRoute>
+                  <SharedWithMe />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/profile"
+              element={
+                <ProtectedRoute>
+                  <Profile />
                 </ProtectedRoute>
               }
             />

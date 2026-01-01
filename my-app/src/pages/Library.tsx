@@ -8,9 +8,13 @@ import {
   ChevronRight,
   AlertCircle,
   Clock,
+  Share2,
+  Edit2,
 } from 'lucide-react';
 import { videoAPI } from '../services/api';
 import { Link } from 'react-router-dom';
+import { ShareModal } from '../components/ShareModal';
+import { EditModal } from '../components/EditModal';
 
 interface Video {
   _id: string;
@@ -19,7 +23,7 @@ interface Video {
   status: 'uploaded' | 'processing' | 'completed' | 'flagged';
   fileSize: number;
   duration?: number;
-  createdAt: string;
+  uploadedAt: string;
   sensitivity?: {
     classification: string;
     score: number;
@@ -35,8 +39,21 @@ export const Library: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [error, setError] = useState('');
+  const [userRole, setUserRole] = useState<string>('');
+  const [shareModal, setShareModal] = useState<{ isOpen: boolean; videoId?: string; videoTitle?: string }>({
+    isOpen: false,
+  });
+  const [editModal, setEditModal] = useState<{ isOpen: boolean; videoId?: string; title?: string; description?: string }>({
+    isOpen: false,
+  });
 
   useEffect(() => {
+    // Get user role from localStorage
+    const userData = localStorage.getItem('user');
+    if (userData) {
+      const user = JSON.parse(userData);
+      setUserRole(user.role || '');
+    }
     loadVideos();
   }, [currentPage, statusFilter]);
 
@@ -261,7 +278,7 @@ export const Library: React.FC = () => {
                       <span>{formatFileSize(video.fileSize)}</span>
                       <span className="flex items-center gap-1">
                         <Clock className="w-3 h-3" />
-                        {formatDate(video.createdAt)}
+                        {formatDate(video.uploadedAt)}
                       </span>
                     </div>
 
@@ -269,6 +286,22 @@ export const Library: React.FC = () => {
                       <button onClick={() => handlePlayVideo(video._id)} className="flex-1 btn-secondary py-2 text-sm gap-2 flex items-center justify-center hover:shadow-lg transition-shadow">
                         <Play className="w-4 h-4" />
                         Play
+                      </button>
+                      {userRole === 'editor' && (
+                        <button
+                          onClick={() => setEditModal({ isOpen: true, videoId: video._id, title: video.title, description: video.description })}
+                          className="btn-ghost py-2 px-3 flex items-center justify-center"
+                          title="Edit video details"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                      )}
+                      <button
+                        onClick={() => setShareModal({ isOpen: true, videoId: video._id, videoTitle: video.title })}
+                        className="btn-ghost py-2 px-3 flex items-center justify-center"
+                        title="Share video"
+                      >
+                        <Share2 className="w-4 h-4" />
                       </button>
                       <button
                         onClick={() => handleDeleteVideo(video._id)}
@@ -307,6 +340,25 @@ export const Library: React.FC = () => {
           </>
         )}
       </div>
+
+      {/* Share Modal */}
+      <ShareModal
+        isOpen={shareModal.isOpen}
+        onClose={() => setShareModal({ isOpen: false })}
+        videoId={shareModal.videoId || ''}
+        videoTitle={shareModal.videoTitle || ''}
+        onShareSuccess={loadVideos}
+      />
+
+      {/* Edit Modal */}
+      <EditModal
+        isOpen={editModal.isOpen}
+        onClose={() => setEditModal({ isOpen: false })}
+        videoId={editModal.videoId || ''}
+        initialTitle={editModal.title || ''}
+        initialDescription={editModal.description || ''}
+        onEditSuccess={loadVideos}
+      />
     </div>
   );
 };

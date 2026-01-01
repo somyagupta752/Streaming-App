@@ -4,6 +4,9 @@ import path from 'path';
 import Video from '../models/Video.js';
 import ProcessingJob from '../models/ProcessingJob.js';
 import User from '../models/User.js';
+import { extractFrames, cleanupFrames } from '../utils/frameExtractor.js';
+import { analyzeFrames } from '../utils/frameAnalyzer.js';
+import { classifyContent } from '../utils/contentClassifier.js';
 
 export const uploadVideo = async (req, res) => {
   try {
@@ -130,13 +133,21 @@ export const getVideoDetails = async (req, res) => {
       return res.status(404).json({ message: 'Video not found' });
     }
 
-    // Check authorization
-    if (video.userId.toString() !== req.user._id.toString()) {
+    // Check authorization - owner or shared user
+    const isOwner = video.userId.toString() === req.user._id.toString();
+    const isSharedUser = video.sharedWith.some(
+      s => s.userId && s.userId.toString() === req.user._id.toString()
+    );
+
+    if (!isOwner && !isSharedUser) {
       return res.status(403).json({ message: 'Unauthorized' });
     }
 
-    // Get processing job details
-    const job = await ProcessingJob.findOne({ videoId: id });
+    // Get processing job details (only for owner)
+    let job = null;
+    if (isOwner) {
+      job = await ProcessingJob.findOne({ videoId: id });
+    }
 
     res.status(200).json({
       message: 'Video details retrieved successfully',
@@ -152,6 +163,7 @@ export const getVideoDetails = async (req, res) => {
         uploadedAt: video.uploadedAt,
         processedAt: video.processedAt,
       },
+      isOwner,
       job: job ? {
         jobId: job.jobId,
         progress: job.progress,
@@ -204,6 +216,56 @@ export const deleteVideo = async (req, res) => {
   }
 };
 
+export const updateVideo = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, description } = req.body;
+
+    if (!title && !description) {
+      return res.status(400).json({ message: 'At least title or description is required' });
+    }
+
+    const video = await Video.findById(id);
+
+    if (!video) {
+      return res.status(404).json({ message: 'Video not found' });
+    }
+
+    // Check authorization - owner or editor role user can update
+    const isOwner = video.userId.toString() === req.user._id.toString();
+    const isEditorShared = video.sharedWith.some(
+      s => s.userId && s.userId.toString() === req.user._id.toString() && s.role === 'editor'
+    );
+
+    if (!isOwner && !isEditorShared) {
+      return res.status(403).json({ message: 'Unauthorized. Only video owner or editor role user can edit' });
+    }
+
+    // Update fields
+    if (title) {
+      video.title = title.trim();
+    }
+    if (description) {
+      video.description = description.trim();
+    }
+
+    await video.save();
+
+    res.status(200).json({
+      message: 'Video updated successfully',
+      video: {
+        id: video._id,
+        title: video.title,
+        description: video.description,
+        updatedAt: video.updatedAt,
+      },
+    });
+  } catch (error) {
+    console.error('Update video error:', error);
+    res.status(500).json({ message: 'Failed to update video', error: error.message });
+  }
+};
+
 export const streamVideo = async (req, res) => {
   try {
     const { id } = req.params;
@@ -214,8 +276,13 @@ export const streamVideo = async (req, res) => {
       return res.status(404).json({ message: 'Video not found' });
     }
 
-    // Check authorization
-    if (video.userId.toString() !== req.user._id.toString()) {
+    // Check authorization - owner or shared user
+    const isOwner = video.userId.toString() === req.user._id.toString();
+    const isSharedUser = video.sharedWith.some(
+      s => s.userId && s.userId.toString() === req.user._id.toString()
+    );
+
+    if (!isOwner && !isSharedUser) {
       return res.status(403).json({ message: 'Unauthorized' });
     }
 
@@ -228,6 +295,17 @@ export const streamVideo = async (req, res) => {
     const stat = fs.statSync(filePath);
     const fileSize = stat.size;
     const range = req.headers.range;
+
+    // Ensure we have a reasonable mime type for streaming clients
+    const ext = path.extname(filePath).toLowerCase();
+    let mimeType = video.mimeType;
+    if (!mimeType) {
+      if (ext === '.mov') mimeType = 'video/quicktime';
+      else if (ext === '.webm') mimeType = 'video/webm';
+      else if (ext === '.ogv' || ext === '.ogg') mimeType = 'video/ogg';
+      else if (ext === '.avi') mimeType = 'video/x-msvideo';
+      else mimeType = 'video/mp4';
+    }
 
     // Update views
     await Video.findByIdAndUpdate(id, { $inc: { views: 1 } });
@@ -242,14 +320,16 @@ export const streamVideo = async (req, res) => {
         'Content-Range': `bytes ${start}-${end}/${fileSize}`,
         'Accept-Ranges': 'bytes',
         'Content-Length': chunksize,
-        'Content-Type': video.mimeType,
+        'Content-Type': mimeType,
+        'Content-Disposition': 'inline',
       });
 
       fs.createReadStream(filePath, { start, end }).pipe(res);
     } else {
       res.writeHead(200, {
         'Content-Length': fileSize,
-        'Content-Type': video.mimeType,
+        'Content-Type': mimeType,
+        'Content-Disposition': 'inline',
       });
 
       fs.createReadStream(filePath).pipe(res);
@@ -263,10 +343,10 @@ export const streamVideo = async (req, res) => {
 // Helper function to simulate video processing
 function simulateVideoProcessing(videoId, jobId) {
   const stages = [
-    { stage: 'extracting_metadata', duration: 3000 },
-    { stage: 'analyzing_content', duration: 5000 },
+    { stage: 'extracting_metadata', duration: 2000 },
+    { stage: 'analyzing_content', duration: 3000 },
+    { stage: 'classifying_content', duration: 4000 },
     { stage: 'generating_thumbnail', duration: 2000 },
-    { stage: 'optimizing', duration: 4000 },
   ];
 
   let currentStage = 0;
@@ -274,38 +354,115 @@ function simulateVideoProcessing(videoId, jobId) {
 
   const processStage = async () => {
     if (currentStage >= stages.length) {
-      // Complete processing
-      await ProcessingJob.findByIdAndUpdate(jobId, {
-        status: 'completed',
-        progress: 100,
-        stage: 'completed',
-        completedAt: new Date(),
-      });
+      // Perform content classification
+      try {
+        const video = await Video.findById(videoId);
+        if (!video) {
+          throw new Error('Video not found');
+        }
 
-      // Simulate sensitivity analysis
-      const sensitivityScore = Math.floor(Math.random() * 100);
-      let classification = 'safe';
-      const reasons = [];
+        let videoPath = path.join('uploads', video.filename);
 
-      if (sensitivityScore > 75) {
-        classification = 'flagged';
-        reasons.push('Adult content detected');
-      } else if (sensitivityScore > 50) {
-        classification = 'warning';
-        reasons.push('Content may need review');
+        // If uploaded file is not MP4, transcode to MP4 for browser compatibility
+        const { transcodeToMp4 } = await import('../utils/transcode.js');
+        const ext = path.extname(videoPath).toLowerCase();
+        if (ext !== '.mp4') {
+          try {
+            const mp4Name = `${path.parse(video.filename).name}.mp4`;
+            const mp4Path = path.join('uploads', mp4Name);
+            console.log('Transcoding to mp4:', videoPath, '->', mp4Path);
+            await transcodeToMp4(videoPath, mp4Path, {
+              onProgress: (p) => {
+                // Optionally update job progress based on transcoding
+                ProcessingJob.findByIdAndUpdate(jobId, { progress: 10 });
+              },
+            });
+
+            // Update DB to point to MP4
+            const stats = fs.statSync(mp4Path);
+            await Video.findByIdAndUpdate(videoId, {
+              filename: mp4Name,
+              mimeType: 'video/mp4',
+              fileSize: stats.size,
+            });
+
+            // Remove original file to save space
+            try {
+              if (fs.existsSync(videoPath) && videoPath !== mp4Path) fs.unlinkSync(videoPath);
+            } catch (e) {
+              console.warn('Failed to delete original file after transcode:', e.message || e);
+            }
+
+            videoPath = mp4Path;
+            console.log('Transcode completed, using:', videoPath);
+          } catch (err) {
+            console.warn('Transcode failed, continuing with original file:', err.message || err);
+          }
+        }
+
+        // Extract frames every 2 seconds, max 30 frames
+        console.log('Extracting frames from video...');
+        const framePaths = await extractFrames(videoPath, 2, 30);
+        console.log(`Extracted ${framePaths.length} frames`);
+
+        // Analyze frames
+        console.log('Analyzing frames...');
+        const frameAnalysis = await analyzeFrames(framePaths);
+        console.log('Frame analysis complete:', frameAnalysis);
+
+        // Classify content based on heuristics
+        console.log('Classifying content...');
+        const classification = await classifyContent(videoPath, frameAnalysis);
+        console.log('Classification complete:', classification);
+
+        // Clean up extracted frames
+        cleanupFrames(framePaths);
+
+        // Update video with classification results
+        await Video.findByIdAndUpdate(videoId, {
+          status: classification.classification === 'flagged' ? 'flagged' : 'completed',
+          processedAt: new Date(),
+          duration: formatDuration(classification.metadata.duration),
+          sensitivity: {
+            classification: classification.classification,
+            score: classification.score,
+            reasons: classification.reasons,
+          },
+        });
+
+        // Complete processing
+        await ProcessingJob.findByIdAndUpdate(jobId, {
+          status: 'completed',
+          progress: 100,
+          stage: 'completed',
+          completedAt: new Date(),
+        });
+
+        console.log(
+          `Video ${videoId} classification: ${classification.classification} (score: ${classification.score})`
+        );
+      } catch (err) {
+        console.error('Content classification error:', err);
+
+        // Fallback: mark as completed with safe classification
+        await ProcessingJob.findByIdAndUpdate(jobId, {
+          status: 'completed',
+          progress: 100,
+          stage: 'completed',
+          completedAt: new Date(),
+        });
+
+        await Video.findByIdAndUpdate(videoId, {
+          status: 'completed',
+          processedAt: new Date(),
+          duration: '0:00',
+          sensitivity: {
+            classification: 'safe',
+            score: 0,
+            reasons: ['Classification encountered errors, defaulting to safe'],
+          },
+        });
       }
-
-      // Update video with final status
-      await Video.findByIdAndUpdate(videoId, {
-        status: classification === 'flagged' ? 'flagged' : 'completed',
-        processedAt: new Date(),
-        duration: '12:45',
-        sensitivity: {
-          classification,
-          score: sensitivityScore,
-          reasons,
-        },
-      });
 
       return;
     }
@@ -316,11 +473,11 @@ function simulateVideoProcessing(videoId, jobId) {
     await ProcessingJob.findByIdAndUpdate(jobId, {
       status: 'processing',
       stage,
-      progress: Math.round((currentStage / stages.length) * 100),
+      progress: Math.round(((currentStage + 1) / stages.length) * 100),
       startedAt: currentStage === 0 ? new Date() : undefined,
     });
 
-    currentProgress = Math.round((currentStage / stages.length) * 100);
+    currentProgress = Math.round(((currentStage + 1) / stages.length) * 100);
     currentStage++;
 
     // Simulate processing time
@@ -328,6 +485,22 @@ function simulateVideoProcessing(videoId, jobId) {
   };
 
   processStage();
+}
+
+/**
+ * Format duration in seconds to HH:MM:SS format
+ */
+function formatDuration(seconds) {
+  if (!seconds || seconds === 0) return '0:00';
+
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  }
+  return `${minutes}:${secs.toString().padStart(2, '0')}`;
 }
 
 export const getJobProgress = async (req, res) => {
