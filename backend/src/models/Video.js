@@ -94,7 +94,7 @@ const videoSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 // Index for faster queries
-videoSchema.index({ userId: 1, createdAt: -1 });
+videoSchema.index({ userId: 1, uploadedAt: -1 });
 videoSchema.index({ status: 1 });
 
 export default mongoose.model('Video', videoSchema);

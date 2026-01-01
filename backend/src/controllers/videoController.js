@@ -91,25 +91,43 @@ export const getVideos = async (req, res) => {
     }
 
     const videos = await Video.find(query)
-      .sort({ createdAt: -1 })
+      .sort({ uploadedAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
 
     const total = await Video.countDocuments(query);
 
+    // Get jobIds for processing videos
+    const videoIds = videos.map(v => v._id);
+    const processingJobs = await ProcessingJob.find({ videoId: { $in: videoIds } });
+    const jobMap = new Map();
+    processingJobs.forEach(job => {
+      jobMap.set(job.videoId.toString(), job.jobId);
+    });
+
     res.status(200).json({
       message: 'Videos retrieved successfully',
-      videos: videos.map(v => ({
-        _id: v._id,
-        title: v.title,
-        description: v.description,
-        status: v.status,
-        sensitivity: v.sensitivity,
-        fileSize: v.fileSize,
-        views: v.views,
-        uploadedAt: v.uploadedAt,
-        processedAt: v.processedAt,
-      })),
+      videos: videos.map(v => {
+        const videoData = {
+          _id: v._id,
+          title: v.title,
+          description: v.description,
+          status: v.status,
+          sensitivity: v.sensitivity,
+          fileSize: v.fileSize,
+          views: v.views,
+          uploadedAt: v.uploadedAt,
+          processedAt: v.processedAt,
+        };
+        // Include jobId for processing videos
+        if (v.status === 'processing') {
+          const jobId = jobMap.get(v._id.toString());
+          if (jobId) {
+            videoData.jobId = jobId;
+          }
+        }
+        return videoData;
+      }),
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),

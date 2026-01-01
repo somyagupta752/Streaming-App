@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
   Film,
@@ -18,7 +18,8 @@ interface Video {
   progress: number;
   fileSize: number;
   duration?: number;
-  createdAt: string;
+  uploadedAt: string;
+  jobId?: string;
 }
 
 export const Dashboard: React.FC = () => {
@@ -35,6 +36,77 @@ export const Dashboard: React.FC = () => {
   useEffect(() => {
     loadDashboard();
   }, []);
+
+  // Get processing video IDs and jobIds for polling
+  const processingVideoIds = useMemo(() => {
+    return videos
+      .filter(v => v.status === 'processing' && v.jobId)
+      .map(v => ({ id: v._id, jobId: v.jobId! }));
+  }, [videos]);
+
+  // Poll for progress updates on processing videos
+  useEffect(() => {
+    if (processingVideoIds.length === 0) {
+      return;
+    }
+
+    const updateProgress = async () => {
+      try {
+        const progressPromises = processingVideoIds.map(async ({ id, jobId }) => {
+          try {
+            const response = await videoAPI.getJobProgress(jobId);
+            return {
+              id,
+              progress: response.data.job.progress,
+              status: response.data.job.status,
+            };
+          } catch (err) {
+            console.error(`Error fetching progress for video ${id}:`, err);
+            return null;
+          }
+        });
+
+        const results = await Promise.all(progressPromises);
+        
+        setVideos(prevVideos => {
+          let needsReload = false;
+          const updatedVideos = prevVideos.map(video => {
+            const result = results.find(r => r && r.id === video._id);
+            if (result) {
+              // Update progress and status if job is completed
+              const newStatus = result.status === 'completed' ? 'completed' : video.status;
+              if (result.status === 'completed' && video.status === 'processing') {
+                needsReload = true;
+              }
+              return {
+                ...video,
+                progress: result.progress,
+                status: newStatus as Video['status'],
+              };
+            }
+            return video;
+          });
+
+          // If any videos completed, reload dashboard to get updated status
+          if (needsReload) {
+            setTimeout(() => loadDashboard(), 100);
+          }
+
+          return updatedVideos;
+        });
+      } catch (err) {
+        console.error('Error updating progress:', err);
+      }
+    };
+
+    // Update immediately
+    updateProgress();
+
+    // Poll every 2 seconds
+    const interval = setInterval(updateProgress, 2000);
+
+    return () => clearInterval(interval);
+  }, [processingVideoIds]);
 
   const loadDashboard = async () => {
     try {
@@ -59,10 +131,30 @@ export const Dashboard: React.FC = () => {
         return gb.toFixed(2) + ' GB';
       };
 
-      setVideos(recentVideos.map((v: any) => ({
-        ...v,
-        progress: v.status === 'completed' ? 100 : v.status === 'processing' ? 45 : 100,
-      })));
+      // Fetch progress for processing videos
+      const videosWithProgress = await Promise.all(
+        recentVideos.map(async (v: any) => {
+          let progress = v.status === 'completed' ? 100 : 0;
+          
+          // If processing and has jobId, fetch current progress
+          if (v.status === 'processing' && v.jobId) {
+            try {
+              const progressResponse = await videoAPI.getJobProgress(v.jobId);
+              progress = progressResponse.data.job.progress || 0;
+            } catch (err) {
+              console.error(`Error fetching progress for video ${v._id}:`, err);
+              progress = 0;
+            }
+          }
+          
+          return {
+            ...v,
+            progress,
+          };
+        })
+      );
+
+      setVideos(videosWithProgress);
       
       setStats({
         totalVideos,
@@ -287,7 +379,7 @@ export const Dashboard: React.FC = () => {
                           <div className="flex flex-wrap gap-4 text-xs text-neutral-600">
                             <span>{formatFileSize(video.fileSize)}</span>
                             {video.duration && <span>{video.duration}s</span>}
-                            <span>{formatDate(video.createdAt)}</span>
+                            <span>{formatDate(video.uploadedAt)}</span>
                           </div>
                         </div>
 
